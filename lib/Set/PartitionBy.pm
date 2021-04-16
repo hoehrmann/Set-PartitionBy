@@ -303,7 +303,7 @@ sub history {
 
   my ($self) = @_;
 
-  return map { $_->[0] = $self->elements->[ $_->[0] ]; $_ }
+  return map { $_->[0] = $self->elements->[ $_->[0] - 1 ]; $_ }
     $self->_dbh->selectall_array(q{
     SELECT element, src, dst, round FROM history
   });
@@ -320,11 +320,11 @@ my $p = Set::PartitionBy->new(
   storage_dsn => 'dbi:SQLite:dbname=delme.db'
 );
 
-$p->partition(1, 2, 7, 12, 31, 16, 3, 4, 9, 63)
-  ->once_by(sub { $_ & 0b0001 })
-  ->once_by(sub { $_ & 0b0010 })
-  ->once_by(sub { $_ & 0b0100 })
-  ->once_by(sub { $_ & 0b1000 })
+$p->partition(12287, 524287, 0x7f, 0x20ac, 0x80, 0xf6, 0x801, 0x800, 0xffff, 0x10000, 0x10001, 0x10ffff, 4096, 262144)
+  ->once_by(sub { $_ & (2** 6 - 1) })
+  ->once_by(sub { $_ & (2**12 - 1) })
+  ->once_by(sub { $_ & (2**18 - 1) })
+  ->once_by(sub { $_ & (2**21 - 1) })
   ;
 
 while ($p->refine) {

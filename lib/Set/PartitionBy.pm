@@ -145,6 +145,9 @@ sub partition {
 
   my ($self, @elements) = @_;
 
+  # TODO: Would it make sense to use $p->elements(@list)->once_by...
+  # instead? 
+
   die if $self->elements;
 
   @{ $self->_element_to_id }{ @elements } = 1 .. @elements;
@@ -184,6 +187,11 @@ sub refine {
   my ($self) = @_;
 
   my $sub = sub { };
+
+  # TODO: Could do this just once for every element and then run the
+  # SQL with cached results, possibly stored in a dedicated table, or
+  # in fact the tracking table, so avoid going back and forth between
+  # Perl and SQLite too much?
 
   $self->_dbh->sqlite_create_function('partition_by', 1, sub {
 
@@ -231,14 +239,16 @@ sub refine {
   } elsif (@{ $self->_then_by }) {
 
     $sub = $self->_then_by->[ $self->_round % @{ $self->_then_by } ];
-  }
 
-  my $ra;
+  } else {
+
+    return;
+  }
 
   $self->_dbh->begin_work;
 
   my ($before) = $self->_dbh->selectrow_array(q{ select max(partition) from tracking });
-  $ra = $update_sth->execute();
+  my $ra = $update_sth->execute();
   my ($after) = $self->_dbh->selectrow_array(q{ select max(partition) from tracking });
 
   if ($before < $after) {
@@ -303,6 +313,8 @@ sub last_common {
 
   my ($self, $element1, $element2) = @_;
 
+  # NOTE: UnionBy would have reversed logic
+
   my ($last_partition, $last_round) = $self->_dbh->selectrow_array(q{
 
     SELECT
@@ -321,6 +333,8 @@ sub last_common {
 sub partition_tree {
   
   my ($self) = @_;
+
+  # NOTE: UnionBy would have reversed logic
 
   $self->_dbh->selectall_array(q{
     SELECT DISTINCT src, dst FROM history

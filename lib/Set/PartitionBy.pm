@@ -130,8 +130,14 @@ sub _transaction {
   my ($self, $sub) = @_;
 
   $self->_dbh->begin_work;
-  $sub->();
-  $self->_dbh->commit;
+
+  if ($sub->()) {
+    $self->_dbh->rollback;
+
+  } else {
+    $self->_dbh->commit;
+
+  }
 
 }
 
@@ -185,7 +191,9 @@ sub refine {
 
     local $_ = $self->elements->[ $element - 1 ];
 
-    return $sub->( $_ );
+    my $key = $sub->( $_ );
+
+    return '' . $key;
 
   });
 
@@ -227,12 +235,20 @@ sub refine {
 
   my $ra;
 
-  $self->_transaction(sub {
-    $ra = $update_sth->execute();
-    $self->_round( $self->_round + 1 );
-  });
+  $self->_dbh->begin_work;
 
-  return $ra > 0;
+  my ($before) = $self->_dbh->selectrow_array(q{ select max(partition) from tracking });
+  $ra = $update_sth->execute();
+  my ($after) = $self->_dbh->selectrow_array(q{ select max(partition) from tracking });
+
+  if ($before < $after) {
+    $self->_round( $self->_round + 1 );
+    $self->_dbh->commit;
+  } else {
+    $self->_dbh->rollback;
+  }
+
+  return $after - $before;
 }
 
 sub peers {
@@ -271,11 +287,23 @@ sub to_partition {
 
 }
 
+sub mapping {
+  my ($self) = @_;
+
+  my @mapping = $self->_dbh->selectall_array(q{
+    SELECT element, partition FROM tracking      
+  });
+
+  $_->[0] = $self->elements->[ $_->[0] - 1 ] for @mapping;
+
+  return @mapping;
+}
+
 sub last_common {
 
   my ($self, $element1, $element2) = @_;
 
-  return $self->_dbh->selectrow_array(q{
+  my ($last_partition, $last_round) = $self->_dbh->selectrow_array(q{
 
     SELECT
       COALESCE(MAX(a.dst), 1) AS partition,
@@ -287,6 +315,7 @@ sub last_common {
 
   }, {}, map { $self->_element_to_id->{$_} } $element1, $element2);
 
+  return ($last_partition, $last_round);
 }
 
 sub partition_tree {

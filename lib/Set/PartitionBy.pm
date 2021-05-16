@@ -8,6 +8,7 @@ use Log::Any;
 use Moo;
 use Types::Standard qw/:all/;
 use Tie::RefHash;
+use Scalar::Util qw/weaken/;
 
 our $VERSION = '0.01';
 
@@ -70,6 +71,14 @@ has '_round' => (
   default  => 0,
 );
 
+has '_partition_by' => (
+  is       => 'rw',
+  required => 0,
+  isa      => CodeRef,
+  default  => sub { sub { } },
+);
+
+
 sub BUILD {
   my ($self) = @_;
 
@@ -82,6 +91,21 @@ sub BUILD {
   $self->_set_dbh( $dbh );
 
   $self->_deploy_schema;
+
+  my $weak_self = $self;
+  weaken $weak_self;
+
+  $self->_dbh->sqlite_create_function('partition_by', 1, sub {
+
+    my ($element) = @_;
+
+    local $_ = $weak_self->elements->[ $element - 1 ];
+
+    my $key = $weak_self->_partition_by->( $_ );
+
+    return '' . $key;
+
+  });
 
 }
 
@@ -191,19 +215,7 @@ sub refine {
   # TODO: Could do this just once for every element and then run the
   # SQL with cached results, possibly stored in a dedicated table, or
   # in fact the tracking table, so avoid going back and forth between
-  # Perl and SQLite too much?
-
-  $self->_dbh->sqlite_create_function('partition_by', 1, sub {
-
-    my ($element) = @_;
-
-    local $_ = $self->elements->[ $element - 1 ];
-
-    my $key = $sub->( $_ );
-
-    return '' . $key;
-
-  });
+  # Perl and SQLite too much? (about ^ partition_by)
 
   my $update_sth = $self->_dbh->prepare(q{
     WITH
@@ -234,11 +246,13 @@ sub refine {
 
   if (@{ $self->_once_by }) {
 
-    $sub = shift @{ $self->_once_by };
+    $self->_partition_by( shift @{ $self->_once_by } );
 
   } elsif (@{ $self->_then_by }) {
 
-    $sub = $self->_then_by->[ $self->_round % @{ $self->_then_by } ];
+    $self->_partition_by(
+      $self->_then_by->[ $self->_round % @{ $self->_then_by } ]
+    );
 
   } else {
 
